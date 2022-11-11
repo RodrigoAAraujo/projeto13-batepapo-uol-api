@@ -1,0 +1,31 @@
+{
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dayjs": "^1.11.6",
+    "dotenv": "^16.0.3",
+    "express": "^4.18.2",
+    "joi": "^17.7.0",
+    "mongodb": "^4.11.0"
+  },
+  "devDependencies": {
+    "nodemon": "^2.0.20"
+  },
+  "name": "projeto13-batepapo-uol-api",
+  "description": "Api de aplicacao UOL",
+  "version": "1.0.0",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "npx nodemon src/index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/RodrigoAAraujo/projeto13-batepapo-uol-api.git"
+  },
+  "author": "Rodrigo Antunes",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/RodrigoAAraujo/projeto13-batepapo-uol-api/issues"
+  },
+  "homepage": "https://github.com/RodrigoAAraujo/projeto13-batepapo-uol-api#readme"
+}
