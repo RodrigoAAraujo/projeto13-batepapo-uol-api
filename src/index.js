@@ -5,7 +5,7 @@ import dotenv from 'dotenv'
 import joi from 'joi'
 import { MongoClient, ObjectId} from 'mongodb'
 
-//Valiations
+//Validations
 
 const participantsSchema = joi.object({
     name: joi.string().min(1).required()
@@ -34,6 +34,9 @@ let db
 
 await mongoClient.connect()
 db = mongoClient.db("bate_papo_UOL")
+const participantsCollection = db.collection("participants")
+const messagesCollection = db.collection("messages")
+
 
 //Routes
 
@@ -48,19 +51,21 @@ app.post("/participants", async (req, res)=>{
     }
 
     try{
-        const participantsCollection =  await db.collection("participants").find({name: body.name}).toArray()
+        const participantsCollection =  await participantsCollection.find(
+            {name: body.name.toLowerCase()}
+        ).toArray()
         if(participantsCollection.length > 0){
             res.status(409).send("Esse nome já está sendo usado")
             return
         }
 
-        await db.collection("participants").insertOne({
-            name : body.name, 
+        await participantsCollection.insertOne({
+            name : body.name.toLowerCase(), 
             lastStatus: Date.now()
         })
 
-        await db.collection("messages").insertOne({
-            from: body.name, 
+        await messagesCollection.insertOne({
+            from: body.name.toLowerCase(), 
             to: 'Todos', 
             text: 'entra na sala...', 
             type: 'status', 
@@ -78,7 +83,7 @@ app.post("/participants", async (req, res)=>{
 
 app.get("/participants", async (req,res)=>{
     try{
-        const participants = await db.collection("participants").find({}).toArray()
+        const participants = await participantsCollection.find({}).toArray()
 
         res.status(200).send(participants)
 
@@ -100,14 +105,27 @@ app.post("/messages", async (req, res)=>{
     }
 
     try{
-        const participantExist = await db.collection("participants").find({name: user}).toArray()
+        const participantExist = await participantsCollection.find({name: user.toLowerCase()}).toArray()
 
         if(participantExist.length == 0){
             res.status(422).send("O usuário que enviou não está cadastrado.")
             return 
         }
 
-        await db.collection("messages").insertOne({
+        const participantToReceiveExist = await participantsCollection.find({name: body.to.toLowerCase()}).toArray()
+
+        if(participantToReceiveExist.length == 0){
+            res.status(422).send("O usuário para quem enviou não existe")
+            return 
+        }
+
+
+        if(body.to.toLowerCase() === user.toLowerCase()){
+            res.status(422).send("Não pode enviar mensagens para si mesmo")
+            return
+        }
+
+        await messagesCollection.insertOne({
            to: body.to,
            from: user,
            text: body.text,
@@ -116,7 +134,8 @@ app.post("/messages", async (req, res)=>{
         })
 
         res.sendStatus(201)
-    }catch{
+        return
+    }catch(err){
         res.status(500).send({message: err.message})
         return
     }
@@ -124,10 +143,21 @@ app.post("/messages", async (req, res)=>{
 })
 
 app.get("/messages", async (req,res)=>{
-    try{
-        const messages = await db.collection("messages").find({}).toArray()
+    const {limit} = req.query
+    const {user} = req.headers
 
-        res.status(200).send(messages)
+    try{
+        const messages = await messagesCollection.find(
+            { $or: [ { type: "message" }, { to: user } , {from: user}] }
+        ).toArray()
+
+        if(limit){
+            res.status(200).send(messages.slice(-Number(limit)))
+            return
+        }
+
+        res.status(200).send(messages.slice(-100))
+        return
     }catch(err){
         res.status(500).send({message: err.message})
         return
@@ -140,9 +170,6 @@ app.post("/status", (req, res)=>{
 
 
 })
-
-
-
 
 
 
