@@ -17,10 +17,6 @@ const messagesSchema = joi.object({
     type: joi.alternatives().try(joi.string().equal("message"), joi.string().equal("private_message"))
 })
 
-const statusSchema = joi.object({
-    User:joi.string().min(3).required()
-})
-
 //Congig
 
 dotenv.config()
@@ -49,7 +45,7 @@ async function removeInactive(){
         await participantsCollection.deleteMany({lastStatus: {$lt: (now -10000)}})
         const deletedOnesNames = deletedOnes.map(d => d.name)
 
-        if (deletedOnesNames.length === 0){
+        if (deletedOnesNames.length !== 0){
             const SignOutMessages  = deletedOnesNames.map((e) =>{
                 const objectToReturn = {
                     from: e, 
@@ -64,10 +60,9 @@ async function removeInactive(){
             await messagesCollection.insertMany(SignOutMessages)
         }
 
-        return
-
+        return null
     }catch(err){
-        return
+        return err
     }
 }
 
@@ -80,16 +75,16 @@ app.post("/participants", async (req, res)=>{
     const validation = participantsSchema.validate(body, {abortEarly: false})
 
     if(validation.error){
-        res.status(409).send("Nome é obrigatório e maior que 3 caracteres")
+        res.status(422).send(validation.error.details.map(detail => detail.message))
         return
     }
 
     try{
-        const participants =  await participantsCollection.find(
+        const participants =  await participantsCollection.findOne(
             {name: body.name.toLowerCase()}
-        ).toArray()
+        )
 
-        if(participants.length > 0){
+        if(participants !== null){
             res.status(409).send("Esse nome já está sendo usado")
             return
         }
@@ -132,6 +127,11 @@ app.post("/messages", async (req, res)=>{
     const body = req.body
     const {user} = req.headers
 
+    if(!user){
+        res.sendStatus(400)
+        return
+    }
+
     const validation = messagesSchema.validate(body, {abortEarly: false})
 
     if(validation.error){
@@ -140,20 +140,12 @@ app.post("/messages", async (req, res)=>{
     }
 
     try{
-        const participantExist = await participantsCollection.find({name: user.toLowerCase()}).toArray()
+        const participantExist = await participantsCollection.findOne({name: user.toLowerCase()})
 
-        if(participantExist.length == 0){
+        if(participantExist === null){
             res.status(422).send("O usuário que enviou não está cadastrado.")
             return 
         }
-
-        const participantToReceiveExist = await participantsCollection.find({name: body.to.toLowerCase()}).toArray()
-
-        if(participantToReceiveExist.length == 0){
-            res.status(422).send("O usuário para quem enviou não existe")
-            return 
-        }
-
 
         if(body.to.toLowerCase() === user.toLowerCase()){
             res.status(422).send("Não pode enviar mensagens para si mesmo")
@@ -182,13 +174,13 @@ app.get("/messages", async (req,res)=>{
     const {user} = req.headers
 
     if(!user){
-        res.sendStatus(401)
+        res.sendStatus(400)
         return
     }
 
     try{
         const messages = await messagesCollection.find(
-            { $or: [ { type: "message" }, {type: "status"}, { to: user } , {from: user}] }
+            { $or: [ { type: "message" }, {type: "status"}, { to: user }, {to: "Todos"}, {from: user}] }
         ).toArray()
 
         if(limit){
@@ -208,23 +200,114 @@ app.get("/messages", async (req,res)=>{
 app.post("/status", async (req, res)=>{
     const {user} = req.headers
 
-    try{        
-        const participantExist = await participantsCollection.find({name: user.toLowerCase()}).toArray()
+    if(!user){
+        res.sendStatus(400)
+        return
+    }
 
-        if(participantExist.length === 0){
+    try{        
+        const participantExist = await participantsCollection.findOne({name: user.toLowerCase()})
+
+        if(participantExist == null){
             res.sendStatus(404)
             return
         }
         
-        participantsCollection.updateOne(participantExist, {$set: {time: Date.now()}})
+        participantsCollection.updateOne(participantExist, {$set: {lastStatus: Date.now()}})
 
         res.sendStatus(200)
         return
+
     }catch(err){
         res.status(500).send({message: err.message})
         return
     }
 })
 
+app.delete("/messages/:id", async (req,res)=>{
+    const {user}= req.headers
+    const {id} = req.params
+
+    try{
+        const messageDelete = await messagesCollection.findOne({_id: ObjectId(id)})
+
+        if(messageDelete === null){
+            res.sendStatus(404)
+            return
+        }
+
+        if(messageDelete.from.toLowerCase() !== user.toLowerCase()){
+            res.status(401)
+            return
+        }
+
+        if(messageDelete.type === "status"){
+            res.sendStatus(401)
+            return
+        }
+
+        await messagesCollection.deleteOne({_id: ObjectId(id)})
+
+        res.sendStatus(200)
+        return
+
+    }catch(err){
+        res.status(500).send({message: err.message})
+        return
+    }
+
+})
+
+app.put("/messages/:id", async (req,res) =>{
+    const {user} = req.headers
+    const body = req.body
+    const {id} = req.params
+
+    if(!user){
+        res.sendStatus(400)
+        return
+    }
+    const validation = messagesSchema.validate(body, {abortEarly: false})
+    if(validation.error){
+        res.status(422).send(validation.error.details.map(detail => detail.message))
+        return
+    }
+
+
+    try{
+        const participantExist = await participantsCollection.findOne({name: user.toLowerCase()})
+
+        if(participantExist === null){
+            res.status(422).send("O usuário que enviou não está ativo no momento.")
+            return 
+        }
+
+        const UpdatableMessage = await messagesCollection.findOne({_id: ObjectId(id)})
+
+        if(UpdatableMessage === null){
+            res.sendStatus(404)
+            return
+        }
+
+        if(user.toLowerCase() !== UpdatableMessage.from.toLowerCase()){
+            res.status(401)
+            return
+        }
+
+        if(UpdatableMessage.type === "status"){
+            res.sendStatus(401)
+            return
+        }
+
+        await messagesCollection.updateOne(UpdatableMessage, {$set: body})
+
+        res.sendStatus(201)
+        return
+
+    }catch(err){
+        res.status(500).send({message: err.message})
+        return
+    }
+})
 
 app.listen(5000)
